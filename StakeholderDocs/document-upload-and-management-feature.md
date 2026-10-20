@@ -297,12 +297,11 @@ public interface IFileStorageService
 - Before testing document upload for the first time, ensure clean database state
 - If previous upload attempts failed, drop and recreate database to remove orphaned records:
   ```powershell
-  sqllocaldb stop mssqllocaldb
-  sqllocaldb delete mssqllocaldb
+  Remove-Item .\ContosoDashboard.db* -ErrorAction SilentlyContinue
   # Database will be recreated automatically on next run
   ```
 - Orphaned records with empty FilePath values will cause duplicate key violations
-- For LocalDB: `dotnet ef database drop --force` also works if EF tools are installed
+- Run the command from the `ContosoDashboard` directory. `dotnet ef database drop --force` also works if EF tools are installed.
 
 ## Assumptions
 
