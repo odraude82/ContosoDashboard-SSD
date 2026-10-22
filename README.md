@@ -245,6 +245,37 @@ The default connection string in `appsettings.json` uses SQLite:
 
 The database file is created in the application's working directory when the app starts.
 
+### Document Upload and SQLite Migrations
+
+Document uploads are stored under `AppData/uploads` in the application content root, outside
+`wwwroot`. The location and limits are configured by `DocumentStorage` in `appsettings.json`:
+
+```json
+"DocumentStorage": {
+   "RootPath": "AppData/uploads",
+   "MaxFileSizeBytes": 26214400,
+   "MaxFilesPerBatch": 10
+}
+```
+
+The app generates storage names and accepts only validated PDF, DOCX, XLSX, PPTX, UTF-8 text, JPEG,
+and PNG content. It publishes uploads only after a clean malware scan. Configure a local ClamAV
+daemon on loopback using the `MalwareScanner` host, port, and timeout settings. The scanner is
+required at runtime; if it is unavailable or returns an indeterminate result, uploads fail closed.
+This workflow and the mock authentication are for training only, not production use.
+
+SQLite startup applies EF Core migrations. Fresh databases receive the baseline and additive feature
+migrations. When startup finds a pre-existing `EnsureCreated` database without migration history, it
+compares the complete application schema with the expected baseline. A matching schema is adopted
+transactionally before additive migrations run; a mismatch stops startup without changing the
+database. Back up an existing database before upgrading, retain the backup until validation is
+complete, and never delete or recreate the database to resolve a migration error. Validate with:
+
+```powershell
+dotnet build .\ContosoDashboard-SSD\ContosoDashboard\ContosoDashboard.csproj -c Release
+dotnet test .\ContosoDashboard-SSD\ContosoDashboard.Tests\ContosoDashboard.Tests.csproj -c Release
+```
+
 ### Production Authentication Guidance
 
 This training application uses mock authentication. For production applications, you would need to:

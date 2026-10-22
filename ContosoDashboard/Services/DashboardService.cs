@@ -40,7 +40,26 @@ public class DashboardService : IDashboardService
                 .CountAsync(),
 
             UnreadNotifications = await _context.Notifications
-                .CountAsync(n => n.UserId == userId && !n.IsRead)
+                .CountAsync(n => n.UserId == userId && !n.IsRead),
+
+            PersonalDocumentCount = await _context.Documents
+                .CountAsync(document => document.UploadedByUserId == userId),
+
+            RecentPersonalDocuments = await _context.Documents.AsNoTracking()
+                .Where(document => document.UploadedByUserId == userId)
+                .OrderByDescending(document => document.UploadedAtUtc)
+                .ThenByDescending(document => document.DocumentId)
+                .Take(5)
+                .Select(document => new DocumentListItem(
+                    document.DocumentId,
+                    document.Title,
+                    document.Category,
+                    document.UploadedAtUtc,
+                    document.FileSizeBytes,
+                    document.Project == null ? null : document.Project.Name,
+                    document.ContentType,
+                    document.UploadedByUserId))
+                .ToListAsync()
         };
 
         return summary;
@@ -67,4 +86,6 @@ public class DashboardSummary
     public int TasksDueToday { get; set; }
     public int ActiveProjects { get; set; }
     public int UnreadNotifications { get; set; }
+    public int PersonalDocumentCount { get; set; }
+    public List<DocumentListItem> RecentPersonalDocuments { get; set; } = [];
 }

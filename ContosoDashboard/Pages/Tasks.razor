@@ -5,6 +5,7 @@
 @using System.Security.Claims
 @attribute [Authorize]
 @inject ITaskService TaskService
+@inject DocumentService DocumentService
 @inject AuthenticationStateProvider AuthenticationStateProvider
 
 <PageTitle>My Tasks - ContosoDashboard</PageTitle>
@@ -133,6 +134,56 @@
             </table>
         </div>
     }
+    @if (selectedTask is not null)
+    {
+        <section class="mt-4" aria-labelledby="task-documents-heading">
+            <div class="d-flex align-items-start justify-content-between gap-3">
+                <h2 id="task-documents-heading" class="h4">Documents for @selectedTask.Title</h2>
+                <button class="btn btn-sm btn-outline-secondary" type="button" @onclick="CloseTaskDocuments">Close</button>
+            </div>
+            @if (taskDocuments.Count == 0)
+            {
+                <p class="text-muted">No documents are attached to this task.</p>
+            }
+            else
+            {
+                <ul class="list-unstyled">
+                    @foreach (var document in taskDocuments)
+                    {
+                        <li><a href="/documents/@document.DocumentId/preview">@document.Title</a> <span class="text-muted">@document.Category</span></li>
+                    }
+                </ul>
+            }
+            <div class="row g-3 align-items-end mt-2">
+                <div class="col-md-6">
+                    <label class="form-label" for="attach-existing-document">Attach an available document</label>
+                    <select id="attach-existing-document" class="form-select" @bind="selectedDocumentId">
+                        <option value="">Select a document</option>
+                        @foreach (var document in availableDocuments)
+                        {
+                            <option value="@document.DocumentId">@document.Title</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <button class="btn btn-outline-primary w-100" type="button" @onclick="AttachSelectedDocumentAsync" disabled="@(!selectedDocumentId.HasValue)">Attach</button>
+                </div>
+            </div>
+            <div class="row g-3 align-items-end mt-2">
+                <div class="col-md-4">
+                    <label class="form-label" for="task-document-title">Upload title</label>
+                    <input id="task-document-title" class="form-control" maxlength="255" @bind="taskDocumentTitle" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label" for="task-document-file">Upload to task</label>
+                    <InputFile id="task-document-file" OnChange="OnTaskFileSelected" accept=".pdf,.docx,.xlsx,.pptx,.txt,.jpg,.jpeg,.png" class="form-control" />
+                </div>
+                <div class="col-md-4">
+                    <button class="btn btn-primary w-100" type="button" @onclick="UploadTaskFileAsync" disabled="@(taskFile is null)">Upload and attach</button>
+                </div>
+            </div>
+        </section>
+    }
 </div>
 
 @code {
@@ -140,6 +191,12 @@
     private string filterStatus = "";
     private string filterPriority = "";
     private int currentUserId = 0;
+    private TaskItem? selectedTask;
+    private IReadOnlyList<DocumentListItem> taskDocuments = [];
+    private IReadOnlyList<DocumentListItem> availableDocuments = [];
+    private int? selectedDocumentId;
+    private string taskDocumentTitle = string.Empty;
+    private IBrowserFile? taskFile;
 
     protected override async Task OnInitializedAsync()
     {
@@ -185,9 +242,64 @@
         // TODO: Implement modal dialog for creating tasks
     }
 
-    private void ViewTaskDetails(int taskId)
+    private async Task ViewTaskDetails(int taskId)
     {
-        // TODO: Navigate to task details or show modal
+        selectedTask = await TaskService.GetTaskByIdAsync(taskId, currentUserId);
+        if (selectedTask is null)
+        {
+            return;
+        }
+
+        taskDocuments = await DocumentService.GetTaskDocumentsAsync(taskId, currentUserId);
+        availableDocuments = await DocumentService.SearchDocumentsAsync(currentUserId, new DocumentQuery());
+        selectedDocumentId = null;
+        taskFile = null;
+        taskDocumentTitle = selectedTask.Title;
+    }
+
+    private void CloseTaskDocuments()
+    {
+        selectedTask = null;
+        taskDocuments = [];
+        taskFile = null;
+    }
+
+    private async Task AttachSelectedDocumentAsync()
+    {
+        if (selectedTask is null || selectedDocumentId is not int documentId)
+        {
+            return;
+        }
+
+        await DocumentService.LinkDocumentToTaskAsync(documentId, selectedTask.TaskId, currentUserId);
+        taskDocuments = await DocumentService.GetTaskDocumentsAsync(selectedTask.TaskId, currentUserId);
+        selectedDocumentId = null;
+    }
+
+    private void OnTaskFileSelected(InputFileChangeEventArgs args) => taskFile = args.File;
+
+    private async Task UploadTaskFileAsync()
+    {
+        if (selectedTask is null || taskFile is null)
+        {
+            return;
+        }
+
+        await using var stream = taskFile.OpenReadStream(25 * 1024 * 1024);
+        var request = new DocumentUploadRequest(
+            taskFile.Name,
+            taskDocumentTitle,
+            null,
+            "Project Documents",
+            selectedTask.ProjectId,
+            [],
+            stream,
+            taskFile.Size,
+            selectedTask.TaskId);
+        await DocumentService.UploadAsync(currentUserId, [request]);
+        taskDocuments = await DocumentService.GetTaskDocumentsAsync(selectedTask.TaskId, currentUserId);
+        availableDocuments = await DocumentService.SearchDocumentsAsync(currentUserId, new DocumentQuery());
+        taskFile = null;
     }
 
     private string GetPriorityColor(TaskPriority priority)

@@ -1,0 +1,65 @@
+@page "/documents/shared"
+@using System.Security.Claims
+@using Microsoft.AspNetCore.Authorization
+@attribute [Authorize]
+@inject DocumentService DocumentService
+@inject AuthenticationStateProvider AuthenticationStateProvider
+
+<PageTitle>Shared with Me - ContosoDashboard</PageTitle>
+
+<div class="container-fluid">
+    <div class="d-flex flex-wrap align-items-end justify-content-between gap-3 mb-4">
+        <div>
+            <h1>Shared with Me</h1>
+            <p class="text-muted mb-0">Documents shared directly or with your department.</p>
+        </div>
+        <a class="btn btn-outline-secondary" href="/documents">All documents</a>
+    </div>
+
+    @if (documents.Count == 0)
+    {
+        <p class="text-muted">No documents have been shared with you.</p>
+    }
+    else
+    {
+        <div class="table-responsive">
+            <table class="table table-hover align-middle">
+                <thead>
+                    <tr>
+                        <th scope="col">Title</th>
+                        <th scope="col">Category</th>
+                        <th scope="col">Project</th>
+                        <th scope="col">Uploaded</th>
+                        <th scope="col">Open</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var document in documents)
+                    {
+                        <tr>
+                            <td>@document.Title</td>
+                            <td>@document.Category</td>
+                            <td>@(document.ProjectName ?? "-")</td>
+                            <td>@document.UploadedAtUtc.ToLocalTime().ToString("MMM d, yyyy")</td>
+                            <td><a href="/documents/@document.DocumentId/preview">Open</a></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</div>
+
+@code {
+    private IReadOnlyList<DocumentListItem> documents = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        var userIdValue = state.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (int.TryParse(userIdValue, out var userId))
+        {
+            documents = await DocumentService.GetSharedDocumentsAsync(userId);
+        }
+    }
+}

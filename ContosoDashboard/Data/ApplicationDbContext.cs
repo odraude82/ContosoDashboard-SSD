@@ -5,6 +5,8 @@ namespace ContosoDashboard.Data;
 
 public class ApplicationDbContext : DbContext
 {
+    private static readonly DateTime SeedAnchorUtc = new(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+
     public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options)
         : base(options)
     {
@@ -17,6 +19,11 @@ public class ApplicationDbContext : DbContext
     public DbSet<Notification> Notifications { get; set; } = null!;
     public DbSet<ProjectMember> ProjectMembers { get; set; } = null!;
     public DbSet<Announcement> Announcements { get; set; } = null!;
+    public DbSet<Document> Documents { get; set; } = null!;
+    public DbSet<DocumentTag> DocumentTags { get; set; } = null!;
+    public DbSet<DocumentActivity> DocumentActivities { get; set; } = null!;
+    public DbSet<DocumentShare> DocumentShares { get; set; } = null!;
+    public DbSet<DocumentTask> DocumentTasks { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -64,6 +71,99 @@ public class ApplicationDbContext : DbContext
             .HasIndex(u => u.Email)
             .IsUnique();
 
+        modelBuilder.Entity<Document>(entity =>
+        {
+            entity.HasKey(document => document.DocumentId);
+            entity.Property(document => document.Title).IsRequired().HasMaxLength(255);
+            entity.Property(document => document.Description).HasMaxLength(2000);
+            entity.Property(document => document.Category).IsRequired().HasMaxLength(50);
+            entity.Property(document => document.OriginalFileName).IsRequired().HasMaxLength(255);
+            entity.Property(document => document.RelativeStoragePath).IsRequired().HasMaxLength(1024);
+            entity.Property(document => document.ContentType).IsRequired().HasMaxLength(255);
+            entity.Property(document => document.ScannerVersion).HasMaxLength(255);
+            entity.HasOne(document => document.UploadedByUser)
+                .WithMany()
+                .HasForeignKey(document => document.UploadedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(document => document.Project)
+                .WithMany()
+                .HasForeignKey(document => document.ProjectId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(document => new { document.UploadedByUserId, document.UploadedAtUtc });
+            entity.HasIndex(document => new { document.ProjectId, document.UploadedAtUtc });
+            entity.HasIndex(document => new { document.Category, document.UploadedAtUtc });
+            entity.HasIndex(document => document.Title);
+        });
+
+        modelBuilder.Entity<DocumentTag>(entity =>
+        {
+            entity.HasKey(tag => tag.DocumentTagId);
+            entity.Property(tag => tag.Value).IsRequired().HasMaxLength(100);
+            entity.HasOne<Document>()
+                .WithMany(document => document.Tags)
+                .HasForeignKey(tag => tag.DocumentId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasIndex(tag => new { tag.DocumentId, tag.Value }).IsUnique();
+            entity.HasIndex(tag => tag.Value);
+        });
+
+        modelBuilder.Entity<DocumentActivity>(entity =>
+        {
+            entity.HasKey(activity => activity.DocumentActivityId);
+            entity.Property(activity => activity.DocumentTitleSnapshot).HasMaxLength(255);
+            entity.Property(activity => activity.Action).IsRequired().HasMaxLength(50);
+            entity.Property(activity => activity.Outcome).IsRequired().HasMaxLength(20);
+            entity.Property(activity => activity.TargetSnapshot).HasMaxLength(255);
+            entity.HasOne<User>()
+                .WithMany()
+                .HasForeignKey(activity => activity.ActorUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(activity => new { activity.DocumentId, activity.OccurredAtUtc });
+            entity.HasIndex(activity => new { activity.ActorUserId, activity.OccurredAtUtc });
+        });
+
+        modelBuilder.Entity<DocumentShare>(entity =>
+        {
+            entity.HasKey(share => share.DocumentShareId);
+            entity.Property(share => share.RecipientDepartment).HasMaxLength(100);
+            entity.ToTable(table => table.HasCheckConstraint(
+                "CK_DocumentShares_RecipientTarget",
+                "(\"RecipientUserId\" IS NOT NULL AND \"RecipientDepartment\" IS NULL) OR (\"RecipientUserId\" IS NULL AND \"RecipientDepartment\" IS NOT NULL)"));
+            entity.HasOne<Document>()
+                .WithMany()
+                .HasForeignKey(share => share.DocumentId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<User>()
+                .WithMany()
+                .HasForeignKey(share => share.SharedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<User>()
+                .WithMany()
+                .HasForeignKey(share => share.RecipientUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(share => new { share.DocumentId, share.RevokedAtUtc });
+            entity.HasIndex(share => new { share.RecipientUserId, share.RevokedAtUtc });
+            entity.HasIndex(share => new { share.RecipientDepartment, share.RevokedAtUtc });
+        });
+
+        modelBuilder.Entity<DocumentTask>(entity =>
+        {
+            entity.HasKey(link => new { link.DocumentId, link.TaskId });
+            entity.HasOne(link => link.Document)
+                .WithMany(document => document.DocumentTasks)
+                .HasForeignKey(link => link.DocumentId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(link => link.Task)
+                .WithMany(task => task.DocumentTasks)
+                .HasForeignKey(link => link.TaskId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(link => link.LinkedByUser)
+                .WithMany()
+                .HasForeignKey(link => link.LinkedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(link => link.LinkedByUserId);
+        });
+
         // Seed initial data
         SeedData(modelBuilder);
     }
@@ -81,7 +181,7 @@ public class ApplicationDbContext : DbContext
                 JobTitle = "Administrator",
                 Role = UserRole.Administrator,
                 AvailabilityStatus = AvailabilityStatus.Available,
-                CreatedDate = DateTime.UtcNow,
+                CreatedDate = SeedAnchorUtc,
                 EmailNotificationsEnabled = true,
                 InAppNotificationsEnabled = true
             },
@@ -94,7 +194,7 @@ public class ApplicationDbContext : DbContext
                 JobTitle = "Project Manager",
                 Role = UserRole.ProjectManager,
                 AvailabilityStatus = AvailabilityStatus.Available,
-                CreatedDate = DateTime.UtcNow,
+                CreatedDate = SeedAnchorUtc,
                 EmailNotificationsEnabled = true,
                 InAppNotificationsEnabled = true
             },
@@ -107,7 +207,7 @@ public class ApplicationDbContext : DbContext
                 JobTitle = "Team Lead",
                 Role = UserRole.TeamLead,
                 AvailabilityStatus = AvailabilityStatus.Available,
-                CreatedDate = DateTime.UtcNow,
+                CreatedDate = SeedAnchorUtc,
                 EmailNotificationsEnabled = true,
                 InAppNotificationsEnabled = true
             },
@@ -120,7 +220,7 @@ public class ApplicationDbContext : DbContext
                 JobTitle = "Software Engineer",
                 Role = UserRole.Employee,
                 AvailabilityStatus = AvailabilityStatus.Available,
-                CreatedDate = DateTime.UtcNow,
+                CreatedDate = SeedAnchorUtc,
                 EmailNotificationsEnabled = true,
                 InAppNotificationsEnabled = true
             }
@@ -134,11 +234,11 @@ public class ApplicationDbContext : DbContext
                 Name = "ContosoDashboard Development",
                 Description = "Internal employee productivity dashboard",
                 ProjectManagerId = 2,
-                StartDate = DateTime.UtcNow.AddDays(-30),
-                TargetCompletionDate = DateTime.UtcNow.AddDays(60),
+                StartDate = SeedAnchorUtc.AddDays(-30),
+                TargetCompletionDate = SeedAnchorUtc.AddDays(60),
                 Status = ProjectStatus.Active,
-                CreatedDate = DateTime.UtcNow.AddDays(-30),
-                UpdatedDate = DateTime.UtcNow
+                CreatedDate = SeedAnchorUtc.AddDays(-30),
+                UpdatedDate = SeedAnchorUtc
             }
         );
 
@@ -151,12 +251,12 @@ public class ApplicationDbContext : DbContext
                 Description = "Create entity relationship diagram and database design",
                 Priority = TaskPriority.High,
                 Status = Models.TaskStatus.Completed,
-                DueDate = DateTime.UtcNow.AddDays(-20),
+                DueDate = SeedAnchorUtc.AddDays(-20),
                 AssignedUserId = 4,
                 CreatedByUserId = 2,
                 ProjectId = 1,
-                CreatedDate = DateTime.UtcNow.AddDays(-30),
-                UpdatedDate = DateTime.UtcNow.AddDays(-20)
+                CreatedDate = SeedAnchorUtc.AddDays(-30),
+                UpdatedDate = SeedAnchorUtc.AddDays(-20)
             },
             new TaskItem
             {
@@ -165,12 +265,12 @@ public class ApplicationDbContext : DbContext
                 Description = "Set up Microsoft Entra ID authentication",
                 Priority = TaskPriority.Critical,
                 Status = Models.TaskStatus.InProgress,
-                DueDate = DateTime.UtcNow.AddDays(5),
+                DueDate = SeedAnchorUtc.AddDays(5),
                 AssignedUserId = 4,
                 CreatedByUserId = 2,
                 ProjectId = 1,
-                CreatedDate = DateTime.UtcNow.AddDays(-25),
-                UpdatedDate = DateTime.UtcNow
+                CreatedDate = SeedAnchorUtc.AddDays(-25),
+                UpdatedDate = SeedAnchorUtc
             },
             new TaskItem
             {
@@ -179,12 +279,12 @@ public class ApplicationDbContext : DbContext
                 Description = "Design user interface mockups for all main pages",
                 Priority = TaskPriority.Medium,
                 Status = Models.TaskStatus.NotStarted,
-                DueDate = DateTime.UtcNow.AddDays(10),
+                DueDate = SeedAnchorUtc.AddDays(10),
                 AssignedUserId = 4,
                 CreatedByUserId = 2,
                 ProjectId = 1,
-                CreatedDate = DateTime.UtcNow.AddDays(-20),
-                UpdatedDate = DateTime.UtcNow.AddDays(-20)
+                CreatedDate = SeedAnchorUtc.AddDays(-20),
+                UpdatedDate = SeedAnchorUtc.AddDays(-20)
             }
         );
 
@@ -196,7 +296,7 @@ public class ApplicationDbContext : DbContext
                 ProjectId = 1,
                 UserId = 3,
                 Role = "TeamLead",
-                AssignedDate = DateTime.UtcNow.AddDays(-30)
+                AssignedDate = SeedAnchorUtc.AddDays(-30)
             },
             new ProjectMember
             {
@@ -204,7 +304,7 @@ public class ApplicationDbContext : DbContext
                 ProjectId = 1,
                 UserId = 4,
                 Role = "Developer",
-                AssignedDate = DateTime.UtcNow.AddDays(-30)
+                AssignedDate = SeedAnchorUtc.AddDays(-30)
             }
         );
 
@@ -216,8 +316,8 @@ public class ApplicationDbContext : DbContext
                 Title = "Welcome to ContosoDashboard",
                 Content = "Welcome to the new ContosoDashboard application. This platform will help you manage your tasks and projects more efficiently.",
                 CreatedByUserId = 1,
-                PublishDate = DateTime.UtcNow,
-                ExpiryDate = DateTime.UtcNow.AddDays(30),
+                PublishDate = SeedAnchorUtc,
+                ExpiryDate = SeedAnchorUtc.AddDays(30),
                 IsActive = true
             }
         );

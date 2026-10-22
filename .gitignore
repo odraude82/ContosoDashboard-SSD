@@ -254,6 +254,7 @@ ServiceFabricBackup/
 
 # SQLite database files
 ContosoDashboard.db*
+ContosoDashboard/AppData/
 
 # Business Intelligence projects
 *.rdl.data

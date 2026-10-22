@@ -1,0 +1,120 @@
+@page "/documents/activity"
+@using System.Security.Claims
+@using Microsoft.AspNetCore.Authorization
+@attribute [Authorize(Roles = "Administrator")]
+@inject DocumentService DocumentService
+@inject AuthenticationStateProvider AuthenticationStateProvider
+
+<PageTitle>Document Activity - ContosoDashboard</PageTitle>
+
+<div class="container-fluid">
+    <div class="d-flex flex-wrap align-items-end justify-content-between gap-3 mb-4">
+        <div>
+            <h1>Document Activity</h1>
+            <p class="text-muted mb-0">Activity records are retained; no automatic purge is configured.</p>
+        </div>
+        <div class="d-flex flex-wrap align-items-end gap-2">
+            <div>
+                <label class="form-label" for="activity-from">From</label>
+                <input id="activity-from" class="form-control" type="date" @bind="fromDate" @bind:format="yyyy-MM-dd" />
+            </div>
+            <div>
+                <label class="form-label" for="activity-to">To</label>
+                <input id="activity-to" class="form-control" type="date" @bind="toDate" @bind:format="yyyy-MM-dd" />
+            </div>
+            <button class="btn btn-primary" type="button" @onclick="LoadReportAsync">Apply</button>
+        </div>
+    </div>
+
+    @if (report is not null)
+    {
+        <section class="row g-4 mb-4" aria-label="Document report summaries">
+            <div class="col-lg-4">
+                <h2 class="h5">File types</h2>
+                <table class="table table-sm">
+                    <thead><tr><th>Content type</th><th>Active files</th></tr></thead>
+                    <tbody>
+                        @foreach (var item in report.FileTypes)
+                        {
+                            <tr><td>@item.ContentType</td><td>@item.Count</td></tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+            <div class="col-lg-4">
+                <h2 class="h5">Active uploaders</h2>
+                <table class="table table-sm">
+                    <thead><tr><th>Uploader</th><th>Documents</th></tr></thead>
+                    <tbody>
+                        @foreach (var item in report.Uploaders)
+                        {
+                            <tr><td>@item.DisplayName</td><td>@item.DocumentCount</td></tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+            <div class="col-lg-4">
+                <h2 class="h5">Access patterns</h2>
+                <dl class="row mb-0">
+                    <dt class="col-8">Previews</dt><dd class="col-4">@report.PreviewCount</dd>
+                    <dt class="col-8">Downloads</dt><dd class="col-4">@report.DownloadCount</dd>
+                </dl>
+            </div>
+        </section>
+
+        <section aria-labelledby="activity-history-heading">
+            <h2 id="activity-history-heading" class="h5">Event history</h2>
+            @if (report.Events.Count == 0)
+            {
+                <p class="text-muted">No activity in this date range.</p>
+            }
+            else
+            {
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle">
+                        <thead>
+                            <tr><th>When (UTC)</th><th>Action</th><th>Document</th><th>Actor ID</th><th>Outcome</th><th>Target</th></tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var item in report.Events)
+                            {
+                                <tr>
+                                    <td>@item.OccurredAtUtc.ToString("yyyy-MM-dd HH:mm:ss")</td>
+                                    <td>@item.Action</td>
+                                    <td>@(item.DocumentTitle ?? "Deleted document")</td>
+                                    <td>@item.ActorUserId</td>
+                                    <td>@item.Outcome</td>
+                                    <td>@(item.Target ?? "-")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </section>
+    }
+</div>
+
+@code {
+    private DateTime? fromDate;
+    private DateTime? toDate;
+    private int currentUserId;
+    private DocumentActivityReport? report;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var state = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        var userIdValue = state.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (int.TryParse(userIdValue, out currentUserId))
+        {
+            await LoadReportAsync();
+        }
+    }
+
+    private async Task LoadReportAsync()
+    {
+        DateTime? fromUtc = fromDate.HasValue ? DateTime.SpecifyKind(fromDate.Value.Date, DateTimeKind.Utc) : null;
+        DateTime? toUtc = toDate.HasValue ? DateTime.SpecifyKind(toDate.Value.Date.AddDays(1).AddTicks(-1), DateTimeKind.Utc) : null;
+        report = await DocumentService.GetDocumentActivityReportAsync(currentUserId, fromUtc, toUtc);
+    }
+}

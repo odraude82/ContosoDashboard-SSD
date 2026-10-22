@@ -1,0 +1,76 @@
+@page "/documents/{DocumentId:int}/preview"
+@using System.Security.Claims
+@using Microsoft.AspNetCore.Authorization
+@attribute [Authorize]
+@inject DocumentService DocumentService
+@inject AuthenticationStateProvider AuthenticationStateProvider
+
+<PageTitle>@(document?.Title ?? "Document") - ContosoDashboard</PageTitle>
+
+<div class="container-fluid document-preview-page">
+    <div class="d-flex flex-wrap align-items-start justify-content-between gap-3 mb-3">
+        <div>
+            <a href="/documents" class="text-decoration-none">Documents</a>
+            @if (document is not null)
+            {
+                <h1 class="h3 mt-2 mb-1">@document.Title</h1>
+                <p class="text-muted mb-0">@document.Category · @FormatFileSize(document.FileSizeBytes)</p>
+            }
+        </div>
+        @if (document is not null)
+        {
+            <a class="btn btn-outline-primary" href="/documents/@document.DocumentId/content?download=true">Download</a>
+        }
+    </div>
+
+    @if (isLoading)
+    {
+        <p role="status">Loading document...</p>
+    }
+    else if (document is null)
+    {
+        <p class="text-muted" role="status">Document not found.</p>
+    }
+    else if (document.ContentType is "application/pdf")
+    {
+        <iframe class="document-preview-frame" src="/documents/@document.DocumentId/content?download=false" title="Preview of @document.Title"></iframe>
+    }
+    else if (document.ContentType is "image/jpeg" or "image/png")
+    {
+        <div class="document-image-preview">
+            <img src="/documents/@document.DocumentId/content?download=false" alt="@document.Title" />
+        </div>
+    }
+    else
+    {
+        <p class="text-muted">This file type is available as a download.</p>
+    }
+</div>
+
+@code {
+    [Parameter]
+    public int DocumentId { get; set; }
+
+    private int currentUserId;
+    private bool isLoading = true;
+    private DocumentListItem? document;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var authenticationState = await AuthenticationStateProvider.GetAuthenticationStateAsync();
+        var userIdValue = authenticationState.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (int.TryParse(userIdValue, out currentUserId))
+        {
+            document = await DocumentService.GetAuthorizedDocumentAsync(DocumentId, currentUserId);
+        }
+
+        isLoading = false;
+    }
+
+    private static string FormatFileSize(long bytes) => bytes switch
+    {
+        < 1024 => $"{bytes} B",
+        < 1024 * 1024 => $"{bytes / 1024d:0.#} KB",
+        _ => $"{bytes / (1024d * 1024):0.#} MB"
+    };
+}

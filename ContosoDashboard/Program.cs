@@ -1,8 +1,11 @@
 using Microsoft.EntityFrameworkCore;
 using ContosoDashboard.Data;
+using ContosoDashboard.Options;
 using ContosoDashboard.Services;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Components.Authorization;
+using Microsoft.Extensions.Options;
+using System.Security.Claims;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -43,6 +46,30 @@ builder.Services.AddScoped<ITaskService, TaskService>();
 builder.Services.AddScoped<IProjectService, ProjectService>();
 builder.Services.AddScoped<INotificationService, NotificationService>();
 builder.Services.AddScoped<IDashboardService, DashboardService>();
+builder.Services.AddScoped<DocumentService>();
+builder.Services.AddScoped<SqliteMigrationBootstrapper>();
+builder.Services.AddScoped<DocumentFileValidator>(services =>
+    new DocumentFileValidator(services.GetRequiredService<IOptions<DocumentStorageOptions>>().Value));
+builder.Services.AddScoped<ILocalFileStorage>(services =>
+    new LocalFileStorageService(
+        services.GetRequiredService<IOptions<DocumentStorageOptions>>().Value,
+        services.GetRequiredService<IWebHostEnvironment>().ContentRootPath));
+builder.Services.AddScoped<IMalwareScanner>(services =>
+    new ClamAvMalwareScanner(services.GetRequiredService<IOptions<MalwareScannerOptions>>().Value));
+
+builder.Services.AddOptions<DocumentStorageOptions>()
+    .Bind(builder.Configuration.GetSection(DocumentStorageOptions.SectionName))
+    .ValidateDataAnnotations()
+    .Validate(options => DocumentStorageOptions.IsStorageRootOutsideWebRoot(
+        options.RootPath,
+        builder.Environment.ContentRootPath,
+        builder.Environment.WebRootPath ?? Path.Combine(builder.Environment.ContentRootPath, "wwwroot")),
+        "Document storage must be outside wwwroot.")
+    .ValidateOnStart();
+builder.Services.AddOptions<MalwareScannerOptions>()
+    .Bind(builder.Configuration.GetSection(MalwareScannerOptions.SectionName))
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
 
 // Add HttpContextAccessor for accessing user claims
 builder.Services.AddHttpContextAccessor();
@@ -50,19 +77,10 @@ builder.Services.AddHttpContextAccessor();
 var app = builder.Build();
 
 // Initialize database
-using (var scope = app.Services.CreateScope())
+await using (var scope = app.Services.CreateAsyncScope())
 {
-    var services = scope.ServiceProvider;
-    try
-    {
-        var context = services.GetRequiredService<ApplicationDbContext>();
-        context.Database.EnsureCreated(); // For development - use migrations in production
-    }
-    catch (Exception ex)
-    {
-        var logger = services.GetRequiredService<ILogger<Program>>();
-        logger.LogError(ex, "An error occurred creating the database.");
-    }
+    var bootstrapper = scope.ServiceProvider.GetRequiredService<SqliteMigrationBootstrapper>();
+    await bootstrapper.MigrateAsync();
 }
 
 // Configure the HTTP request pipeline.
@@ -106,6 +124,40 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapBlazorHub();
+app.MapGet("/documents/{documentId:int}/content", async (
+    int documentId,
+    bool? download,
+    HttpContext httpContext,
+    DocumentService documentService,
+    CancellationToken cancellationToken) =>
+{
+    var userIdValue = httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+    if (!int.TryParse(userIdValue, out var userId))
+    {
+        return Results.NotFound();
+    }
+
+    var content = await documentService.OpenAuthorizedContentAsync(
+        documentId,
+        userId,
+        download == true,
+        cancellationToken);
+    if (content is null)
+    {
+        return Results.NotFound();
+    }
+
+    var isPreviewable = content.ContentType is "application/pdf" or "image/jpeg" or "image/png";
+    var disposition = download != true && isPreviewable ? "inline" : "attachment";
+    var safeFileName = Path.GetFileName(content.FileName).Replace("\r", string.Empty).Replace("\n", string.Empty);
+    httpContext.Response.Headers["X-Content-Type-Options"] = "nosniff";
+    httpContext.Response.Headers.ContentDisposition =
+        new System.Net.Http.Headers.ContentDispositionHeaderValue(disposition) { FileName = safeFileName }.ToString();
+
+    return Results.Stream(content.Content, content.ContentType);
+}).RequireAuthorization();
 app.MapFallbackToPage("/_Host");
 
 app.Run();
+
+public partial class Program { }

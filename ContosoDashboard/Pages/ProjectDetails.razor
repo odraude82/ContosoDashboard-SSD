@@ -5,6 +5,7 @@
 @using System.Security.Claims
 @attribute [Authorize]
 @inject IProjectService ProjectService
+@inject DocumentService DocumentService
 @inject NavigationManager NavigationManager
 @inject AuthenticationStateProvider AuthenticationStateProvider
 
@@ -151,6 +152,25 @@
                         }
                     </div>
                 </div>
+                <section class="mt-4" aria-labelledby="project-documents-heading">
+                    <h2 id="project-documents-heading" class="h5">Project Documents</h2>
+                    @if (projectDocuments.Count == 0)
+                    {
+                        <p class="text-muted">No documents are available for this project.</p>
+                    }
+                    else
+                    {
+                        <ul class="list-unstyled">
+                            @foreach (var document in projectDocuments)
+                            {
+                                <li class="py-2 border-bottom">
+                                    <a href="/documents/@document.DocumentId/preview">@document.Title</a>
+                                    <span class="text-muted">@document.Category</span>
+                                </li>
+                            }
+                        </ul>
+                    }
+                </section>
             </div>
 
             <div class="col-md-4">
@@ -237,6 +257,7 @@
     public int ProjectId { get; set; }
 
     private Project? project;
+    private IReadOnlyList<DocumentListItem> projectDocuments = [];
     private int currentUserId = 0;
 
     protected override async Task OnInitializedAsync()
@@ -253,6 +274,10 @@
         if (currentUserId > 0)
         {
             project = await ProjectService.GetProjectByIdAsync(ProjectId, currentUserId);
+            if (project is not null)
+            {
+                projectDocuments = await DocumentService.SearchDocumentsAsync(currentUserId, new DocumentQuery(ProjectId: ProjectId));
+            }
         }
         
         if (project == null)
